@@ -1,25 +1,21 @@
-# Maestria - Hub de Arquitectura y Topología 🏛️
+# Informe de Arquitectura
 
-Este repositorio centraliza toda la documentación técnica, diagramas, topología de red y guías de diseño para el ecosistema de microservicios.
+> **Hub central de la arquitectura de la plataforma Udemy Clone.**  
+> Este informe describe la topología, los servicios, la comunicación, la persistencia y la infraestructura del ecosistema de microservicios.
 
 ---
 
-## 📚 Jerarquía Documental
+## 📘 Documento Principal
 
-La documentación de arquitectura se organiza en dos documentos con roles explícitos. Elige el que responde a tu pregunta antes de profundizar en cualquiera de los repos del ecosistema.
+👉 **[`INFORME_DE_ARQUITECTURA.md`](./INFORME_DE_ARQUITECTURA.md)**
 
-| Documento | Rol | Cuándo leerlo |
-|-----------|-----|---------------|
-| [`IMPLEMENTATION_STATE.md`](./IMPLEMENTATION_STATE.md) | **Estado Actual / Current State** — fuente de verdad de la realidad implementada | Primero si vas a desarrollar, debuggear, provisionar infra o entender qué corre hoy (puertos, bases, flujos, acoplamientos, brechas) |
-| [`TDD_Udemy_Clone_Microservices.md`](./TDD_Udemy_Clone_Microservices.md) | **Arquitectura Objetivo / Target Architecture** — visión de diseño a la que el sistema apunta | Cuando necesites entender la dirección de arquitectura, los patrones que se busca alcanzar y el gap respecto al estado actual |
-
-> El TDD está encabezado con `TARGET ARCHITECTURE v2` y enlaza de vuelta a `IMPLEMENTATION_STATE.md` como fuente de verdad de la realidad. Toda divergencia entre el target y el estado actual está marcada con `OBJETIVO` en el TDD y con `⚠️ DESVIACION` en `IMPLEMENTATION_STATE.md`.
+Contiene la descripción completa de la arquitectura: topología, responsabilidades por servicio, patrones de comunicación, persistencia, autenticación, almacenamiento de media, contratos compartidos, decisiones arquitectónicas y operación local.
 
 ---
 
 ## 🗺️ Topología General de Componentes
 
-El ecosistema está fragmentado en componentes independientes con propósitos específicos. Para el detalle de cada nodo (puertos verificados, persistencia, flujos), consulta `IMPLEMENTATION_STATE.md`; este diagrama sirve como mapa de orientación rápida.
+El ecosistema está compuesto por un API Gateway, cinco microservicios de dominio, un broker de eventos, object storage y una base de datos PostgreSQL por servicio. El detalle de cada nodo se encuentra en el [informe completo](./INFORME_DE_ARQUITECTURA.md); este diagrama sirve como mapa de orientación rápida.
 
 ```mermaid
 graph TD
@@ -42,56 +38,41 @@ graph TD
     subgraph Broker e Infraestructura Docker
         RMQ[RabbitMQ - Event Broker]
         MIO[MinIO - S3 Object Storage]
-        DB_CAT[PostgreSQL - Catalog DB]
-        DB_ENR[PostgreSQL - Enrollment DB]
-        DB_SAL[PostgreSQL - Sales DB]
+        DB_USER[(PostgreSQL - User DB)]
+        DB_CAT[(PostgreSQL - Catalog DB)]
+        DB_ENR[(PostgreSQL - Enrollment DB)]
+        DB_SAL[(PostgreSQL - Sales DB)]
     end
 
     FE -->|HTTP/REST| GW
-    GW -->|GET /uploads/* estáticos| FE
     GW -->|gRPC| US
     GW -->|gRPC| CS
     GW -->|gRPC| MS
     GW -->|gRPC| ES
     GW -->|gRPC| SS
 
+    US -->|Prisma| DB_USER
     CS -->|Prisma| DB_CAT
     ES -->|Prisma| DB_ENR
     SS -->|Prisma| DB_SAL
 
-    SS -->|Publica Compra| RMQ
-    RMQ -->|Suscribe Evento| ES
+    SS -->|Publica evento course.purchased| RMQ
+    RMQ -->|Consume evento| ES
     MS -->|S3 API| MIO
-
-    ES -.->|gRPC directo: GetCourseInfo / GetCourseDetails / GetCoursesByIds| CS
 ```
 
-> **Notas de la topología:**
-> - La flecha `GW → /uploads/*` refleja el estado actual: el API Gateway sirve archivos estáticos desde su propio disco (videos, portadas, recursos). En la visión objetivo (ver TDD) el Gateway es stateless y todo el material pasa por MinIO. Detalle en `IMPLEMENTATION_STATE.md` §2, §4.5 y §6.2.
-> - La flecha punteada `ES -.-> CS` representa el acoplamiento directo por gRPC entre `enrollment-service` y `catalog-service` para resolver datos de curso (precio, detalle, batch). No aparece en diagramas históricos. Detalle en `IMPLEMENTATION_STATE.md` §3.4 y §6.4.
-> - **Servicio de reseñas (gap):** el contrato `review.proto` está declarado en `maestria-grpc-contracts` con CRUD completo, pero **no existe** el repositorio `maestria-review-service` y el API Gateway **no registra** un cliente gRPC de reseñas. La capacidad está documentada en el TDD como `OBJETIVO` y en `IMPLEMENTATION_STATE.md` §6.5 como `Problema Conocido`.
-
 ---
 
-## 📁 Documentos Disponibles
+## 🛠️ Repositorios del Ecosistema
 
-*   [`IMPLEMENTATION_STATE.md`](./IMPLEMENTATION_STATE.md) — **Estado Actual** (primario). Topología, puertos verificados, persistencia PostgreSQL-only, flujos reales, infraestructura, problemas conocidos.
-*   [`TDD_Udemy_Clone_Microservices.md`](./TDD_Udemy_Clone_Microservices.md) — **Arquitectura Objetivo** (secundario, `TARGET ARCHITECTURE v2`). Diseño técnico, contratos gRPC, patrones event-driven y stateless, divergencias marcadas con `OBJETIVO`. La guía de migración de MinIO a AWS S3 vive dentro de este documento (sección 6.2) — no se duplica aquí.
+El código del sistema se distribuye en los siguientes repositorios:
 
----
-
-## 🛠️ Estructura de Repositorios del Ecosistema
-
-Para el desarrollo del proyecto, el código se encuentra distribuido en los siguientes repositorios:
-
-1.  [`maestria-architecture`](https://github.com/Pryectomaestria1/maestria-architecture.git): Documentación, topología y guías de diseño (Este repositorio).
-2.  [`maestria-grpc-contracts`](https://github.com/Pryectomaestria1/maestria-grpc-contracts.git): Contratos compartidos y definiciones `.proto` (Única fuente de verdad).
-3.  [`maestria-infra`](https://github.com/Pryectomaestria1/maestria-infra.git): Archivo `docker-compose.yml` para levantar la base de datos, colas y almacenamiento local.
-4.  [`maestria-api-gateway`](https://github.com/Pryectomaestria1/maestria-api-gateway.git): Puerta de enlace NestJS.
-5.  [`maestria-user-service`](https://github.com/Pryectomaestria1/maestria-user-service.git): Gestión de perfiles y usuarios.
-6.  [`maestria-catalog-service`](https://github.com/Pryectomaestria1/maestria-catalog-service.git): Catálogo de cursos.
-7.  [`maestria-media-service`](https://github.com/Pryectomaestria1/maestria-media-service.git): Streaming y carga de archivos multimedia.
-8.  [`maestria-enrollment-service`](https://github.com/Pryectomaestria1/maestria-enrollment-service.git): Inscripciones y seguimiento de progreso.
-9.  [`maestria-sales-service`](https://github.com/Pryectomaestria1/maestria-sales-service.git): Pasarela simulada de cobros y facturación.
-
-> **Pendiente:** `maestria-review-service` está planificado pero el repositorio aún no existe. El contrato `review.proto` se mantiene en `maestria-grpc-contracts` esperando la implementación del servicio.
+1.  [`maestria-architecture`](https://github.com/Pryectomaestria1/maestria-architecture.git): Informe de arquitectura (este repositorio).
+2.  [`maestria-grpc-contracts`](https://github.com/Pryectomaestria1/maestria-grpc-contracts.git): Contratos compartidos y definiciones `.proto`.
+3.  [`maestria-infra`](https://github.com/Pryectomaestria1/maestria-infra.git): Recursos de soporte local (PostgreSQL, RabbitMQ, MinIO, pgAdmin).
+4.  [`maestria-api-gateway`](https://github.com/Pryectomaestria1/maestria-api-gateway.git): Puerta de enlace REST hacia la capa de microservicios.
+5.  [`maestria-user-service`](https://github.com/Pryectomaestria1/maestria-user-service.git): Gestión de perfiles y roles.
+6.  [`maestria-catalog-service`](https://github.com/Pryectomaestria1/maestria-catalog-service.git): Catálogo de cursos, módulos, lecciones y recursos.
+7.  [`maestria-media-service`](https://github.com/Pryectomaestria1/maestria-media-service.git): URLs prefirmadas y metadatos de recursos multimedia.
+8.  [`maestria-enrollment-service`](https://github.com/Pryectomaestria1/maestria-enrollment-service.git): Inscripciones y progreso de estudiantes.
+9.  [`maestria-sales-service`](https://github.com/Pryectomaestria1/maestria-sales-service.git): Flujo de compra y emisión de eventos.
