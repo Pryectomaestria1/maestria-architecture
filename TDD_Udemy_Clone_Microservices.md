@@ -16,7 +16,6 @@ Este proyecto es la evolución de la Plataforma de Aprendizaje en Línea Udemy C
 
 ## Supuestos
 - La infraestructura permite el despliegue de múltiples servicios aislados (Docker/Kubernetes).
-- `OBJETIVO` — El sistema de base de datos se ha descentralizado: se utilizan bases de datos específicas según el dominio (PostgreSQL para relaciones fuertes y MongoDB). La realidad operativa actual es **PostgreSQL-only** en los cuatro servicios de negocio; el claim de polyglot persistence con MongoDB permanece como aspiración. Ver [`IMPLEMENTATION_STATE.md` §4.1 y §5.3](./IMPLEMENTATION_STATE.md).
 - `OBJETIVO` — Los archivos multimedia (videos, recursos) se manejan en una visión 100% stateless contra MinIO con URLs pre-firmadas; el flujo actual coexiste con escritura directa a disco del API Gateway. Ver §6.2 y [`IMPLEMENTATION_STATE.md` §4.5](./IMPLEMENTATION_STATE.md).
 - Se utiliza Auth0 como proveedor de identidad OIDC centralizado.
 
@@ -25,7 +24,7 @@ Este proyecto es la evolución de la Plataforma de Aprendizaje en Línea Udemy C
 - Separación estricta de dominios: Autenticación, Catálogo, Inscripciones, Multimedia, Ventas (Simulación) y Reseñas (planificado, ver §2).
 - Comunicación interna síncrona mediante **gRPC** y Protocol Buffers para consultas directas.
 - `OBJETIVO` — Arquitectura orientada a eventos (Event-Driven) con **RabbitMQ** para procesos asíncronos (ej. Inscripciones tras compra). El flujo real de inscripción es **híbrido sync + async** (ver §4 y §6.5); el patrón puro event-driven permanece como meta.
-- `OBJETIVO` — Base de datos por servicio (Database-per-service pattern) garantizando bajo acoplamiento, con polyglot persistence (PostgreSQL relacional + MongoDB para perfiles). La realidad actual usa PostgreSQL en los cuatro servicios (ver [`IMPLEMENTATION_STATE.md` §4.1](./IMPLEMENTATION_STATE.md)).
+- `OBJETIVO` — Base de datos por servicio (Database-per-service pattern) garantizando bajo acoplamiento. La realidad actual usa PostgreSQL en los cuatro servicios (ver [`IMPLEMENTATION_STATE.md` §4.1](./IMPLEMENTATION_STATE.md)).
 - Simulador del flujo de compras en un servicio desacoplado.
 - `OBJETIVO` — Manejo de archivos *Stateless* utilizando MinIO (S3 compatible) y URLs pre-firmadas. La realidad combina este path con escritura a disco del API Gateway (ver §6.2).
 
@@ -50,9 +49,8 @@ Este proyecto es la evolución de la Plataforma de Aprendizaje en Línea Udemy C
 
 ### 1.2 Requerimientos No Funcionales
 1. **Baja Latencia Interna:** La comunicación entre el API Gateway y los microservicios se realiza utilizando **gRPC** (binario sobre HTTP/2) para minimizar la latencia.
-2. `OBJETIVO` — **Descentralización de Datos (Polyglot Persistence):** Uso de la base de datos más adecuada para cada servicio (PostgreSQL para esquemas relacionales complejos como Catálogo, y bases de datos o esquemas apartados para Ventas, Autenticación y, en el target, MongoDB para datos no relacionales). La realidad actual usa PostgreSQL en los cuatro servicios; el claim de polyglot permanece como meta. Ver [`IMPLEMENTATION_STATE.md` §4.1 y §5.3](./IMPLEMENTATION_STATE.md).
-3. **Aislamiento de Fallos y Asincronía:** El desacoplamiento garantiza que la falla en un dominio de negocio no detenga por completo la plataforma. La coreografía de eventos vía RabbitMQ permite resiliencia si un microservicio consumidor cae.
-4. **Contratos Estrictos (Protobuf):** Todos los microservicios definen y comparten sus interfaces síncronas usando archivos `.proto` centralizados.
+2. **Aislamiento de Fallos y Asincronía:** El desacoplamiento garantiza que la falla en un dominio de negocio no detenga por completo la plataforma. La coreografía de eventos vía RabbitMQ permite resiliencia si un microservicio consumidor cae.
+3. **Contratos Estrictos (Protobuf):** Todos los microservicios definen y comparten sus interfaces síncronas usando archivos `.proto` centralizados.
 
 ---
 
@@ -331,7 +329,6 @@ model Enrollment {
 ### 6.3 Orquestación con Docker Compose
 Toda la infraestructura se agrupa mediante `docker-compose.yml`, levantando:
 - **Bases de datos**: PostgreSQL.
-- `OBJETIVO` — **MongoDB**: provisionado en `maestria-infra/docker-compose.yml` para soportar la aspiración de polyglot persistence. En la realidad actual **ningún servicio lo consume**; queda como infraestructura ociosa a retirar en un cleanup de `maestria-infra`. Ver [`IMPLEMENTATION_STATE.md` §5.3 y §6.7](./IMPLEMENTATION_STATE.md).
 - **Herramientas**: pgAdmin.
 - **Message Broker**: RabbitMQ (Management UI en 15672).
 - **Object Storage**: MinIO (Console en 9001) con un script automático para crear el bucket `udemy-media`.

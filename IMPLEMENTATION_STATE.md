@@ -16,7 +16,7 @@ El ecosistema está compuesto por **9 repositorios** coordinados:
 |-------------|-----|
 | `maestria-architecture` | Documentación y topología (este repositorio). |
 | `maestria-grpc-contracts` | Contratos `.proto` compartidos y artefactos TypeScript pre-generados. |
-| `maestria-infra` | `docker-compose.yml` con PostgreSQL, MongoDB, RabbitMQ y MinIO. |
+| `maestria-infra` | `docker-compose.yml` con PostgreSQL, RabbitMQ y MinIO. |
 | `maestria-api-gateway` | Punto de entrada REST (NestJS). Orquesta llamadas gRPC hacia los servicios. |
 | `maestria-user-service` | Perfiles de usuario y roles. |
 | `maestria-catalog-service` | Cursos, módulos, lecciones, recursos. |
@@ -38,7 +38,6 @@ El ecosistema está compuesto por **9 repositorios** coordinados:
 | PostgreSQL (Docker infra) | `5433` | `maestria-infra/docker-compose.yml:33` |
 | RabbitMQ (AMQP / Management) | `5672` / `15672` | `maestria-infra/docker-compose.yml:57-58` |
 | MinIO (API / Console) | `9000` / `9001` | `maestria-infra/docker-compose.yml:65-66` |
-| MongoDB | `27017` | `maestria-infra/docker-compose.yml:5` |
 
 ### 1.2 Vista de Componentes (alto nivel)
 
@@ -59,7 +58,6 @@ graph TD
         PG[(PostgreSQL - databases *_db)]
         RMQ[RabbitMQ]
         MIO[MinIO S3-compatible]
-        MON[(MongoDB - provisionado pero no usado)]
     end
 
     FE -->|HTTP/REST| GW
@@ -83,7 +81,6 @@ graph TD
 
 > **Notas del diagrama:**
 > - El acoplamiento directo `enrollment-service → catalog-service` por gRPC existe en código y se documenta en la sección 4.4.
-> - MongoDB está provisionado en `maestria-infra` pero ningún servicio lo consume. Se trata como artefacto muerto (ver `Problemas Conocidos`).
 > - `review.proto` existe en `maestria-grpc-contracts`, pero **no hay cliente gRPC de reseñas registrado en el API Gateway** y **no existe el repositorio del servicio de reseñas** (ver `Problemas Conocidos`).
 
 ---
@@ -142,7 +139,6 @@ graph TD
 ### 4.1 Persistencia
 
 - Toda la persistencia de negocio es **PostgreSQL** (Prisma) para `user-service`, `catalog-service`, `enrollment-service` y `sales-service`.
-- El TDD original proponía polyglot persistence con PostgreSQL y MongoDB. **No hay MongoDB usado por ningún servicio**; la base sigue provisionada en `maestria-infra` (puerto `27017`) pero no se conecta desde los servicios.
 - Las bases se aprovisionan mediante `maestria-api-gateway/docker/postgres-init/01-create-databases.sql` (cuatro `CREATE DATABASE`: `catalog_db`, `enrollment_db`, `sales_db`, `user_db`).
 - El detalle de la divergencia de nombres de base está en la sección 5.2.
 
@@ -186,7 +182,6 @@ La compra culmina en inscripciones a través de **dos caminos concurrentes** que
 - **PostgreSQL 15** provisionado en Docker, expuesto en `5433` desde `maestria-infra/docker-compose.yml` (path **no usado** por los servicios en su `DATABASE_URL`).
 - **RabbitMQ 3 (con management UI)** en Docker. Usado por `sales-service` (publica) y `enrollment-service` (consume). El nombre de cola por defecto es `sales_queue`.
 - **MinIO** (S3-compatible) en Docker. Bucket pre-creado `udemy-media`. Accesible vía S3 API desde `media-service`.
-- **MongoDB** en Docker (`maestria-infra`). Provisionado y arrancado, **sin consumidores** desde los microservicios.
 
 ### 5.2 ⚠️ DESVIACION — Convención de nombres de bases de datos
 
@@ -207,12 +202,6 @@ La compra culmina en inscripciones a través de **dos caminos concurrentes** que
 | `maestria-api-gateway/docker-compose.db.yml` | `18` | `POSTGRES_DB: postgres` | Es la base de admin del contenedor; **no** es la base de servicio. El init script provee las reales. |
 
 **Política:** este cambio **no exige ni instruye** edición de archivos de infra, compose o env. La divergencia queda documentada como drift observado. La reconciliación se trata como trabajo futuro de cleanup de infra (cross-link con la sección equivalente en el TDD).
-
-### 5.3 ⚠️ DESVIACION — MongoDB provisionado sin consumidor
-
-- `maestria-infra/docker-compose.yml:1-11` levanta MongoDB en `27017` y `mongo-express` en `8082`.
-- Ningún servicio referencia MongoDB en su `prisma/schema.prisma`, en su `app.module.ts` ni en sus variables de entorno.
-- El TDD proponía polyglot persistence; el código no la implementa. Se trata como **infraestructura ociosa** a retirar en un cleanup de `maestria-infra`.
 
 ---
 
@@ -253,11 +242,7 @@ Cada entrada describe el impacto arquitectónico del estado actual. No son tarea
 - **Impacto:** un nuevo desarrollador que lea `maestria-infra/README.md` o `maestria-infra/docker-compose.yml` esperará nombres `udemy_*_db` / `udemy_db`, pero los servicios usan `*_db` provisto por el init script del API Gateway. Quien intente conectar a `udemy_db` directamente no encontrará las tablas operativas.
 - **Mitigación:** seguir siempre la convención `*_db` (catalog_db / enrollment_db / sales_db / user_db) declarada en la sección 5.2. La sección 5.2 lista los sources desalineados.
 
-### 6.7 MongoDB provisionado sin consumidor
-
-- **Impacto:** se levanta un contenedor (y su UI) que ningún servicio consume. Aumenta superficie de ataque, consumo de recursos y confusión sobre si el stack realmente es polyglot. No es un bug funcional, sí es drift de infra.
-
-### 6.8 Toolchain de generación de protos no portable
+### 6.7 Toolchain de generación de protos no portable
 
 - **Impacto:** el script `npm run generate` de `maestria-grpc-contracts` referencia una ruta de Windows y un binario `.cmd` que no existen en el árbol real del repo. En la práctica, los tipos TS se generan con un script custom y se commitean pre-generados. Quien intente regenerar en Linux/macOS sin ajustes verá el script fallar.
 
