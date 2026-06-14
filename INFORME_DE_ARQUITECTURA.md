@@ -101,10 +101,17 @@ graph TD
 
 ### 3.4 `media-service`
 - **Tipo:** NestJS con transporte gRPC.
-- **Responsabilidad:** generar URLs prefirmadas de carga y descarga contra MinIO para la transferencia directa de archivos desde el cliente.
+- **Responsabilidad:** mediar la carga directa de archivos del navegador a MinIO mediante URLs prefirmadas (`presigned PUT`) y confirmar la materialización del asset en el catálogo. No actúa como proxy del binario: el navegador PUTea contra MinIO, y `media-service` valida y notifica al catálogo.
 - **Puerto:** `50053` (gRPC).
 - **Persistencia:** no mantiene base de datos propia; opera de forma stateless sobre el object storage.
-- **Almacenamiento:** MinIO (S3 compatible).
+- **Almacenamiento:** MinIO (S3 compatible), bucket `udemy-media` con lectura anónima y CORS configurado para los orígenes del SPA (`PUT`, `GET`, `HEAD`, `MaxAge=900`, `AllowedHeaders=*`).
+- **Flujo de carga presign-URL (cambio D2):**
+  1. `api-gateway` recibe `POST /v1/media/presign` y delega a `media-service.GeneratePresignedUrl(fileType, ownerId, sizeBytes, contentType)`.
+  2. `media-service` genera un key determinista `{prefix}/{ownerId}/{uuid}{ext}` (con `uuid` UUIDv4 por llamada) y devuelve un `presign` PUT firmado contra MinIO con expiración de 900 segundos, vinculado a `Content-Type` y `Content-Length`.
+  3. El cliente (navegador) ejecuta `PUT {uploadUrl}` directo contra MinIO; la firma caduca al pasar los 900s o si `Content-Type`/`Content-Length` no coinciden.
+  4. El cliente llama a `POST /v1/media/confirm` con `{ key, ownerId, fileType, sizeBytes }`; el gateway delega a `media-service.ConfirmUpload`.
+  5. `media-service` ejecuta `HeadObject` para verificar la presencia del objeto, valida que el `ownerId` coincida con el prefijo del key, construye la `canonicalUrl` (`https://${MINIO_PUBLIC_HOST}:${MINIO_PUBLIC_PORT}/udemy-media/{key}`) y dispara el fan-out al servicio de catálogo (`UpdateCourse` / `UpdateLessonVideo` / `AddResourceToLesson`) con un timeout de 5 segundos.
+  6. La respuesta a `POST /v1/media/confirm` incluye `canonicalUrl`, `etag` y `lastModified`; los errores de catálogo (timeout, NOT_FOUND, red) se registran pero no fallan la confirmación.
 
 ### 3.5 `enrollment-service`
 - **Tipo:** NestJS con transporte híbrido (gRPC + RabbitMQ).
@@ -209,6 +216,51 @@ Las migraciones se ejecutan por servicio mediante `prisma migrate` / `prisma db 
 - **Auth0 + JWKS en gateway.** La validación del token ocurre en el gateway sin round-trips a `user-service`, lo que elimina un acoplamiento síncrono innecesario y reduce la latencia por request.
 - **URLs prefirmadas para media.** `media-service` produce URLs prefirmadas contra MinIO que permiten transferir archivos sin que la carga pase por el cuerpo de la request HTTP, y que pueden usarse cuando el caso lo requiera.
 - **Docker Compose para entorno local.** Es la forma más simple de levantar todos los recursos de soporte en un solo comando, sin requerir Kubernetes ni orquestadores equivalentes para desarrollo.
+
+### 10.1 Decisión D2 — Presigned URLs para uploads directos a MinIO
+
+- **Problema.** Los endpoints originales del `api-gateway` para portada de curso (`POST /v1/courses/:id/cover`), video de lección (`POST /v1/lessons/:lessonId/video`) y recurso de lección (`POST /v1/lessons/:lessonId/resources`) escribían el binario en disco local con `fs.writeFileSync` y devolvían una URL hardcodeada `http://localhost:3000/uploads/...`. Esto rompía fuera del host de desarrollo, no escalaba, y forzaba al gateway a actuar como tier de banda en lugar de capa de autenticación y traducción. Se necesitaba un flujo que: (a) no haga pasar el binario por el gateway, (b) siga siendo compatible con un cliente navegador, (c) permita controlar tamaño y tipo por categoría de archivo, y (d) deje una URL pública estable para que el catálogo la persista.
+
+- **Opciones consideradas.**
+  1. **Presigned PUT directo del cliente a MinIO + paso de `ConfirmUpload` separado.** El gateway firma y devuelve la URL; el navegador PUTea; el cliente confirma; el media-service valida con `HeadObject` y notifica al catálogo.
+  2. **Proxy del gateway con gRPC client-stream.** El gateway recibe el binario y lo streamea a `media-service`, que a su vez escribe a MinIO. Concentra todo el tráfico binario en el gateway.
+  3. **Híbrido: presigned para archivos chicos, proxy para videos grandes.** Dos caminos paralelos según `Content-Length`.
+
+- **Decisión.** Se adopta la opción 1. El gateway deja de actuar como conduit binario; `media-service` ya hablaba S3/MinIO (≈60% de la superficie existía), por lo que el delta es agregar `ConfirmUpload` y reglas de tamaño por tipo (`COVER=5MB`, `RESOURCE=100MB`, `VIDEO=5GB`). El híbrido se descartó porque agrega dos caminos de código por una ganancia marginal: el techo real está en la red del cliente, no en el gateway.
+
+- **Consecuencias.**
+  - **CORS deja de ser opcional.** Sin `mc cors set` sobre `udemy-media`, el preflight `OPTIONS` del navegador aborta antes de enviar la firma. El init container de MinIO queda como owner de la política CORS.
+  - **Aparece una categoría de huérfanos.** Si el cliente nunca llama a `ConfirmUpload`, el objeto queda en el bucket hasta la expiración de la firma (900s). Un janitor de huérfanos queda como follow-up explícito.
+  - **Coordinación de rollout.** La SPA debe actualizar los tres componentes (cover form, lesson video uploader, resource uploader) antes de activar `UPLOADS_V2=true`. Mientras la flag esté apagada, los nuevos endpoints devuelven `404` y los viejos siguen disponibles (legacy).
+  - **Coupling media→catalog gana latencia visible.** `ConfirmUpload` espera hasta 5s por la respuesta del catálogo. Se decidió loguear y no surfacear el error para no bloquear al cliente: el objeto en MinIO es la fuente de verdad.
+  - **`canonicalUrl` se construye en `media-service` desde `MINIO_PUBLIC_HOST` + `MINIO_PUBLIC_PORT`.** Migrar a un CDN futuro es una línea (cambiar el host/port); no requiere regenerar URLs existentes.
+
+```mermaid
+sequenceDiagram
+    participant C as Client (Browser)
+    participant G as api-gateway
+    participant M as media-service
+    participant N as MinIO
+    participant K as catalog-service
+
+    C->>G: POST /v1/media/presign (fileType, ownerId, sizeBytes, contentType)
+    G->>M: GeneratePresignedUrl(...)
+    M-->>G: { uploadUrl, key, expiresAt, canonicalUrl }
+    G-->>C: 200 { uploadUrl, key, canonicalUrl, expiresAt }
+
+    C->>N: PUT { uploadUrl } (binary, Content-Type, Content-Length)
+    N-->>C: 200 OK
+
+    C->>G: POST /v1/media/confirm (key, ownerId, fileType, sizeBytes)
+    G->>M: ConfirmUpload(...)
+    M->>N: HeadObject(key)
+    N-->>M: { ETag, LastModified, ContentLength }
+    M->>M: validate ownerId prefix == key owner segment
+    M->>K: UpdateCourse | UpdateLessonVideo | AddResourceToLesson (5s timeout)
+    K-->>M: ok | timeout | NOT_FOUND (logged, not surfaced)
+    M-->>G: { canonicalUrl, etag, lastModified }
+    G-->>C: 200 { canonicalUrl, etag, lastModified }
+```
 
 ---
 
