@@ -88,7 +88,8 @@ graph TD
 
 ### 3.2 `user-service`
 - **Tipo:** NestJS con transporte gRPC.
-- **Responsabilidad:** gestionar perfiles de usuario y roles. Es consultado por el API Gateway para enriquecer la respuesta con datos del perfil y para resolver el rol del usuario autenticado.
+- **Responsabilidad:** cache de perfiles y de overrides de rol. Es consultado por el API Gateway para enriquecer respuestas con datos del perfil (`GetUserProfile`, `GetUsersByIds`) y para registrar/leer overrides explícitos de rol (`SetUserRole`, `GetRole`).
+- **Resolución de rol: solo en el gateway.** La resolución del rol del usuario autenticado ocurre exclusivamente en el API Gateway, a partir del claim `https://udemyclone.com/roles` del JWT ya validado por RS256+JWKS. El `user-service` no decodifica tokens, no verifica firmas, no inspecciona claims. Su rol respecto a la identidad es únicamente servir como **cache de overrides explícitos**: el gateway llama a `SetUserRole({ userId, role })` después de una promoción confirmada en Auth0, y luego consulta `GetRole` cuando quiere aplicar el override sobre el claim del JWT.
 - **Puerto:** `50051` (gRPC).
 - **Persistencia:** PostgreSQL con Prisma.
 
@@ -157,9 +158,12 @@ Las migraciones se ejecutan por servicio mediante `prisma migrate` / `prisma db 
 ## 6. Autenticación y Seguridad
 
 - **Proveedor de identidad (IdP):** Auth0 como OIDC externo.
-- **Validación de tokens:** se realiza 100% en el API Gateway. La firma `RS256` se verifica contra las claves públicas de Auth0 obtenidas por JWKS y cacheadas en memoria, evitando llamadas a `user-service` por cada request.
-- **Propagación de identidad:** una vez validado el token, el `userId` y el `role` se inyectan en `request.user` y se reenvían a los microservicios como atributos del payload de la request gRPC.
+- **Validación de tokens (responsabilidad exclusiva del API Gateway).** La validación de tokens la realiza **únicamente** el API Gateway. La firma `RS256` se verifica contra las claves públicas de Auth0 obtenidas por JWKS y cacheadas en memoria, evitando llamadas a `user-service` por cada request. El `user-service` **no tiene ninguna responsabilidad de validación de tokens**: no decodifica JWT, no verifica firmas, no inspecciona claims. Cualquier handler del `user-service` que necesite la identidad del llamante la recibe exclusivamente vía el metadato gRPC `x-user-id`, que el gateway puebla a partir del `req.user.userId` post-verificación (nunca desde un campo del body, para que el cliente no pueda spoofearlo).
+- **Resolución de rol.** El `role` se toma del claim `https://udemyclone.com/roles` del JWT ya validado. El `user-service` solo expone overrides explícitos — escritos por el gateway vía `SetUserRole` tras una promoción confirmada en Auth0 — que el gateway puede consultar opcionalmente vía `GetRole` para aplicar sobre el claim. Esta separación elimina la superficie de spoofing que existía cuando el `user-service` mezclaba el claim del token con un override local.
+- **Propagación de identidad.** El `userId` verificado se inyecta en `request.user` del gateway y se reenvía a los microservicios como metadato gRPC `x-user-id`. El `role` viaja con la request REST original y no necesita re-enviarse: cada servicio es responsable únicamente de su dominio.
 - **Configuración por variables de entorno:** dominio y audiencia de Auth0 se configuran mediante `AUTH0_ISSUER_URL` y `AUTH0_AUDIENCE` consumidas por `ConfigService`.
+
+> **Pendiente (post-archive).** Refinar la `JwtStrategy` del gateway para que aplique opcionalmente el override del `user-service` (vía `GetRole`) sobre el claim del JWT, completando así la separación de responsabilidades. Este refinamiento queda como follow-up explícito fuera de la presente entrega.
 
 ---
 
