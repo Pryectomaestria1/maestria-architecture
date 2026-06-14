@@ -176,7 +176,7 @@ Las migraciones se ejecutan por servicio mediante `prisma migrate` / `prisma db 
 ## 8. Contratos Compartidos
 
 - **Repositorio:** `maestria-grpc-contracts`.
-- **Contenido:** definiciones `.proto` para cada servicio del ecosistema — `user.proto`, `catalog.proto`, `media.proto`, `enrollment.proto`, `sales.proto` y `review.proto` — fuente única de verdad de los contratos gRPC.
+- **Contenido:** definiciones `.proto` para los servicios implementados del ecosistema — `user.proto`, `catalog.proto`, `media.proto`, `enrollment.proto` y `sales.proto` — fuente única de verdad de los contratos gRPC.
 - **Consumo:** los microservicios cargan su `.proto` desde el path relativo estándar, lo que garantiza que gateway y servicios usen exactamente el mismo contrato.
 - **Tipado:** los servicios utilizan tipos generados a partir de los `.proto` para tipar las llamadas gRPC, manteniendo consistencia entre emisor y receptor.
 
@@ -247,3 +247,5 @@ La SPA en React se conecta exclusivamente al API Gateway en el puerto `3000`.
 | `maestria-media-service` | URLs prefirmadas contra object storage |
 | `maestria-enrollment-service` | Inscripciones y progreso de estudiantes |
 | `maestria-sales-service` | Flujo de compra y emisión de eventos |
+
+> **Nota:** El repo `maestria-grpc-contracts` incluye adicionalmente un `review.proto` con cinco RPCs (`CreateReview`, `GetReview`, `UpdateReview`, `DeleteReview`, `ListCourseReviews`) para un futuro servicio de reseñas de cursos. Esta entrega no incluye el servicio que lo implementaría; el contrato queda en el repo para garantizar compatibilidad cuando se agregue.
