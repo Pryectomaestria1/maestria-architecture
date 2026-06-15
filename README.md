@@ -11,6 +11,10 @@
 
 Contiene la descripción completa de la arquitectura: topología, responsabilidades por servicio, patrones de comunicación, persistencia, autenticación, almacenamiento de media, contratos compartidos, decisiones arquitectónicas y operación local/despliegue en nube (AWS).
 
+**[`DISEÑO_TECNICO.md`](./DISEÑO_TECNICO.md)**
+
+Contiene el Diseño Técnico en el formato formal requerido, incluyendo asunciones, estimaciones de capacidad, inmersión profunda y discusión de decisiones técnicas (gRPC vs REST).
+
 ---
 
 ## Topología General de Componentes
