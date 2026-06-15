@@ -4,31 +4,13 @@
 
 ---
 
-## Resumen
+## Resumen Ejecutivo
 
-El proyecto "Udemy Clone" es una plataforma de aprendizaje en línea (e-learning) diseñada bajo una arquitectura de microservicios orientada a eventos. Su objetivo es permitir a los instructores crear y publicar cursos con contenido multimedia (videos), y a los estudiantes explorar el catálogo, comprar cursos y realizar un seguimiento de su progreso. 
+El proyecto "Udemy Clone" es una plataforma avanzada de e-learning diseñada e implementada bajo una arquitectura de microservicios orientada a eventos. El sistema permite a los instructores crear cursos, estructurarlos en módulos y subir lecciones de video. Por su parte, los estudiantes pueden explorar el catálogo interactivo, realizar compras de cursos y mantener un seguimiento detallado de su progreso de aprendizaje.
 
-El sistema utiliza un **API Gateway** como único punto de entrada público, **gRPC** para la comunicación síncrona interna, y **RabbitMQ** para la orquestación asíncrona de inscripciones tras una compra. El almacenamiento multimedia se delega a **Amazon S3** (o MinIO en local), descargando esta responsabilidad de los servidores de aplicación. El despliegue de producción se realiza en Amazon Web Services (AWS).
+Esta arquitectura fue seleccionada para garantizar alta disponibilidad, tolerancia a fallos, y escalabilidad independiente de cada dominio del negocio. El ecosistema se apoya fuertemente en **gRPC** para la comunicación síncrona de baja latencia entre servicios internos, y en **RabbitMQ** como broker de mensajería para la coreografía de eventos asíncronos (como el procesamiento de compras e inscripciones). 
 
-## Supuestos
-
-- El sistema cuenta con acceso a un proveedor de identidad externo (Auth0) para la gestión de usuarios, login y emisión de JSON Web Tokens (JWT).
-- Los clientes (frontend SPA) acceden exclusivamente a través del API Gateway público, la red interna de microservicios no está expuesta a internet.
-- Se asume el uso de PostgreSQL como motor de base de datos relacional estándar para todos los servicios que requieran persistencia.
-
-## Alcance y Fases
-
-La **Fase 1** (Entregable Actual) incluye:
-- Autenticación y Autorización basada en Roles (Auth0).
-- Catálogo de cursos (creación, edición, visualización).
-- Gestión de medios (carga de portadas y videos directamente a S3 mediante URLs prefirmadas).
-- Flujo de ventas simulado (checkout).
-- Inscripción asíncrona mediante broker de mensajería (RabbitMQ).
-- Visualización de lecciones y seguimiento de progreso del estudiante.
-
-**Fuera del alcance:**
-- Integración con pasarela de pagos real (Stripe/PayPal) para procesar cobros con tarjeta de crédito.
-- Generación y emisión automática de certificados en PDF al finalizar el curso.
+Para el almacenamiento y entrega de contenido multimedia estático, se integra de forma directa con **Amazon S3** mediante el patrón de URLs Prefirmadas, lo que libera a los servidores backend de la pesada carga de procesar flujos de video binarios. La autenticación y seguridad centralizada se delegan en **Auth0** a través de tokens JWT, asegurando que el diseño cumpla con estándares de seguridad modernos de la industria. El despliegue de producción está concebido para entornos de orquestación de contenedores (Docker/Kubernetes) y la nube de AWS EKS.
 
 ---
 
@@ -36,96 +18,44 @@ La **Fase 1** (Entregable Actual) incluye:
 
 ### 1.1 Requerimientos Funcionales
 
-1. Los instructores deben poder crear cursos, definir módulos y subir lecciones en formato de video.
-2. Los estudiantes deben poder explorar el catálogo de cursos disponibles.
-3. Los estudiantes deben poder realizar la compra de un curso de su interés.
-4. Tras una compra exitosa, los estudiantes deben ser inscritos automáticamente y obtener acceso inmediato al contenido del curso.
-5. Los estudiantes deben poder registrar y visualizar su progreso a lo largo de las lecciones del curso.
+1. **Gestión de Cursos (Instructores):** Los usuarios con rol de instructor deben poder crear nuevos cursos, definir el título, descripción y precio, organizar el contenido jerárquicamente (Curso -> Módulos -> Lecciones) y adjuntar una imagen de portada.
+2. **Carga y Entrega de Video:** Los instructores deben poder subir videos para cada lección de forma segura y directa a la nube. Los estudiantes deben poder reproducir los videos de los cursos que han adquirido sin latencia o cortes.
+3. **Catálogo y Búsqueda (Estudiantes):** Los usuarios (autenticados o anónimos limitados) deben poder explorar la oferta educativa disponible en la plataforma visualizando detalles y precios.
+4. **Proceso de Compra (Checkout):** Un estudiante debe poder seleccionar un curso y efectuar una simulación de compra que registre la transacción de manera inmutable.
+5. **Matriculación Automática:** Al concretarse una compra, el sistema debe inscribir al estudiante al curso de manera asíncrona pero rápida, otorgándole acceso al material protegido.
+6. **Seguimiento de Progreso:** El sistema debe registrar qué lecciones han sido completadas por el estudiante y calcular el porcentaje de progreso global del curso.
 
 ### 1.2 Requerimientos No Funcionales
 
-1. El sistema debe ser altamente escalable mediante el desacoplamiento de dominios en microservicios independientes.
-2. El sistema debe garantizar consistencia eventual en el flujo de inscripciones, priorizando la alta disponibilidad del servicio de ventas mediante colas de mensajes (Tolerancia a fallos).
-3. La carga de archivos multimedia pesados (videos) no debe saturar la red interna de los microservicios ni el API Gateway, operando con URLs prefirmadas (Baja latencia y eficiencia de red).
-4. El sistema debe asegurar el aislamiento de datos utilizando el patrón *Database-per-service* para evitar cuellos de botella compartidos en base de datos.
-5. La validación de autenticación debe realizarse de manera *stateless* a nivel de API Gateway utilizando caché de JWKS para minimizar la latencia.
-
-### 1.3 Estimación de Capacidad
-
-Dado que el proyecto fue concebido en un ámbito de maestría, el dimensionamiento inicial está pensado para un entorno de demostración con tráfico moderado. Sin embargo, la arquitectura en AWS EKS permite escalar:
-- **Lecturas vs Escrituras:** Se espera una alta proporción de lecturas (estudiantes viendo el catálogo y consumiendo lecciones) frente a escrituras (compras o creación de cursos).
-- **Almacenamiento:** El uso intensivo de almacenamiento estará focalizado en S3 (videos), por lo que las bases de datos transaccionales (RDS) mantendrán un tamaño manejable (cientos de MBs o pocos GBs).
+1. **Alta Disponibilidad y Tolerancia a Fallos:** La falla de un servicio de lectura (ej. Catálogo) no debe afectar críticamente a los servicios de transacción o escritura (ej. Ventas).
+2. **Eficiencia de Red para Medios Pesados:** La transferencia de archivos de video pesados no debe transitar a través del API Gateway o la red interna de microservicios; el sistema operará con enlaces directos seguros y temporales a S3.
+3. **Seguridad y Aislamiento de Datos:** La arquitectura debe implementar el patrón *Database-per-service*. Cada microservicio poseerá su propio motor o base de datos lógica exclusiva, evitando interbloqueos y acoplamiento temporal de esquemas.
+4. **Validación de Identidad Stateless:** La seguridad y verificación de sesiones de usuario debe realizarse sin consultar constantemente a una base de datos central. Se usa la validación de firmas de tokens JWT almacenando en caché pública (JWKS).
+5. **Comunicación Interna de Baja Latencia:** Para reducir la latencia de red en la arquitectura distribuida, la intercomunicación del backend no usa JSON sobre HTTP/1.1 (REST), sino Protocol Buffers sobre HTTP/2 (gRPC).
 
 ---
 
-## 2. Entidades Principales
+## 2. Arquitectura del Sistema: Diseño de Alto Nivel
 
-- **User (Usuario):** Representa instructores y estudiantes (atributos básicos y roles de Auth0).
-- **Course (Curso):** Metadatos del curso (título, descripción, precio, instructorId, imagen de portada).
-- **Module / Lesson (Módulo / Lección):** Estructura jerárquica del contenido de un curso.
-- **Media (Recurso Multimedia):** Referencias y metadatos de los objetos almacenados en S3 (videos).
-- **Sale (Venta/Transacción):** Registro inmutable de una compra realizada por un estudiante.
-- **Enrollment (Inscripción):** Relación que habilita a un estudiante a acceder a un curso comprado y donde se almacena su progreso por lección.
+### 2.1 Visión General de Componentes y Docker
 
----
+El sistema se levanta íntegramente utilizando contenedores de **Docker**. Durante el desarrollo local, un archivo `docker-compose.yml` orquesta la inicialización coordinada de múltiples bases de datos, brokers de mensajería (RabbitMQ) y el resto del backend. Cada microservicio encapsula su propia lógica de dominio y depende exclusivamente de sus propios recursos de base de datos de forma contenida.
 
-## 3. API o Interfaz del Sistema
-
-### APIs Públicas (REST a través del API Gateway)
-
-```text
-POST /users/register
-GET /catalog/courses
-POST /catalog/courses (Requiere Auth y Rol de Instructor)
-GET /media/upload-url -> Retorna URL prefirmada de S3 para subida directa.
-POST /sales/checkout -> Inicia el flujo de compra.
-GET /enrollments/my-courses -> Lista los cursos comprados por el usuario.
-```
-
-### APIs Internas (gRPC)
-La comunicación interna no utiliza REST, sino Protocol Buffers.
-Ejemplo: `catalog.proto` define el servicio `CatalogService` con las llamadas a procedimientos remotos como `CreateCourse`, invocadas de forma transparente por el API Gateway.
-
----
-
-## 4. Flujo de Datos
-
-**Flujo Asíncrono de Compra e Inscripción**
-
-Este flujo describe cómo la compra de un curso impacta en el servicio de inscripciones de manera asíncrona, protegiendo al usuario de tiempos de espera largos.
-
-```mermaid
-sequenceDiagram
-    actor Estudiante
-    participant APIGateway
-    participant SalesService
-    participant RabbitMQ
-    participant EnrollmentService
-    participant BaseDeDatos
-
-    Estudiante->>APIGateway: 1 POST /sales/checkout
-    APIGateway->>SalesService: 2 gRPC Checkout
-    SalesService->>BaseDeDatos: 3 Guardar transacción en DB de Ventas
-    SalesService--)RabbitMQ: 4 Publicar evento 'course.purchased'
-    SalesService-->>APIGateway: 5 Retornar Éxito (Inmediato)
-    APIGateway-->>Estudiante: 6 Confirmación visual de compra
-    RabbitMQ--)EnrollmentService: 7 Consumir evento 'course.purchased' (Background)
-    EnrollmentService->>BaseDeDatos: 8 Crear registro en DB de Inscripciones
-```
-
----
-
-## 5. Diseño de Alto Nivel
-
-### Componentes
-
-El siguiente diagrama ilustra la arquitectura de componentes. El API Gateway orquesta las llamadas REST del cliente traduciéndolas a gRPC hacia la red de microservicios en las subredes privadas.
+El siguiente diagrama ilustra cómo el API Gateway orquesta las peticiones del cliente (Frontend en React) y las traduce a llamadas gRPC de alta eficiencia hacia la red interna de microservicios.
 
 ```mermaid
 flowchart TD
-    FE[Frontend SPA React] -->|HTTPS REST| GW[API Gateway]
+    %% Entidades Externas
+    FE[Frontend SPA React]
+    Auth0[Auth0 Identity Provider]
+    S3[Amazon S3 Cloud Storage]
     
-    subgraph Microservicios EKS
+    %% API Gateway como único punto de entrada
+    FE -->|1. HTTPS REST / JSON| GW[API Gateway NestJS]
+    FE -.->|2. Login y JWT auth| Auth0
+    
+    %% Red de Microservicios Backend (gRPC)
+    subgraph Ecosistema de Microservicios Docker
         GW -->|gRPC| US[User Service]
         GW -->|gRPC| CS[Catalog Service]
         GW -->|gRPC| MS[Media Service]
@@ -133,103 +63,153 @@ flowchart TD
         GW -->|gRPC| SS[Sales Service]
     end
     
-    US -->|Prisma ORM| DB_U[(PostgreSQL User)]
-    CS -->|Prisma ORM| DB_C[(PostgreSQL Catalog)]
-    ES -->|Prisma ORM| DB_E[(PostgreSQL Enrollment)]
-    SS -->|Prisma ORM| DB_S[(PostgreSQL Sales)]
+    %% Bases de Datos (Database-per-Service)
+    US -->|Prisma ORM| DB_U[(PostgreSQL User DB)]
+    CS -->|Prisma ORM| DB_C[(PostgreSQL Catalog DB)]
+    ES -->|Prisma ORM| DB_E[(PostgreSQL Enrollment DB)]
+    SS -->|Prisma ORM| DB_S[(PostgreSQL Sales DB)]
     
-    SS -->|Publicar Evento| RMQ[RabbitMQ Broker]
-    RMQ -->|Consumir Evento| ES
+    %% Mensajería Asíncrona
+    SS -->|Publicar Evento course.purchased| RMQ[RabbitMQ Broker]
+    RMQ -->|Consumir Evento course.purchased| ES
     
-    MS -->|Generación URLs Prefirmadas| S3[Amazon S3]
-    FE -.->|Subida/Descarga Binaria Directa| S3
+    %% Gestión de Archivos Directos
+    MS -->|Firma URL seguras| S3
+    FE -.->|3. Subida/Descarga Binaria vía URL Directa| S3
+```
+
+### 2.2 Descripción Detallada de Microservicios
+
+1. **API Gateway (`api-gateway`):**
+   - Sirve como la única "puerta delantera" expuesta a internet.
+   - Se encarga de recibir peticiones HTTP/REST, interceptar llamadas, validar los tokens JWT proporcionados por Auth0, y enrutar el tráfico de red de forma inteligente hacia el microservicio interno correspondiente traduciéndolo a clientes gRPC. Actúa como proxy inverso y compositor (API Composition).
+2. **User Service (`user-service`):**
+   - Mantiene los metadatos y preferencias de los perfiles de usuarios registrados. Coordina y almacena internamente los roles (ej. identificando Estudiantes vs Instructores) para cruzar datos, complementando la parte de identidad rígida manejada externamente por Auth0.
+3. **Catalog Service (`catalog-service`):**
+   - El corazón estructural del contenido de aprendizaje. Gestiona la lógica de negocios detrás de la creación de cursos, configuraciones de precios, currículum formativo (módulos, jerarquías de lecciones), descripciones completas y estados de publicación para ser listados públicamente.
+4. **Media Service (`media-service`):**
+   - Especializado puramente en la gestión segura del material estático y audiovisual. En lugar de procesar flujos de bytes que saturarían el backend, este servicio se conecta a la API Cloud (AWS) para pedir y devolver "URLs temporales prefirmadas" a los clientes frontends, para que suban videos de múltiples gigabytes directamente al clúster AWS S3.
+5. **Sales Service (`sales-service`):**
+   - Encapsula estrictamente el dominio de carritos de compras, cálculo de precios y transacciones ("checkout"). Su máxima prioridad es la consistencia transaccional. Guarda la venta inmutablemente en base de datos e informa al sistema asíncronamente emitiendo el evento "alguien acaba de comprar" en las colas de RabbitMQ.
+6. **Enrollment Service (`enrollment-service`):**
+   - Escucha reactivamente de fondo a RabbitMQ esperando eventos de nuevas compras en su propia cola. Cuando un estudiante efectúa un pago exitoso, este servicio abstrae la creación del registro oficial de inscripción que permite el acceso perpetuo al contenido del curso e implementa los controladores REST/gRPC que registran y leen el progreso porcentual del estudiante.
+
+---
+
+## 3. Inmersiones Profundas (Deep Dives Técnicos)
+
+### 3.1 Seguridad, Autenticación y Autorización de Microservicios
+
+El proyecto adopta una arquitectura de seguridad descentralizada que delega toda la criptografía asimétrica pesada a **Auth0**, un servicio global (IDaaS).
+
+**Flujo de Autenticación (`auth`):**
+1. Un cliente se autentica nativamente a través del dashboard modal provisto por Auth0.
+2. Auth0 retorna al Fronted SPA de React un JSON Web Token (JWT) válido por corto tiempo firmado asimétricamente.
+3. El Frontend integra este JWT dentro del encabezado nativo HTTP (`Authorization: Bearer <token>`) de cada solicitud AJAX enviada al Backend.
+4. El **API Gateway** implementa middlewares/guards globales de autenticación. Utiliza la estrategia `passport-jwt` cruzada con la clave pública de Auth0 extraída de la caché JWKS. Verifica matemáticamente que la firma JWT sea inviolable, válida y sin expirar sin ir jamás a una base de datos.
+5. Si el token es limpio y legal, el Gateway decodifica la información del cuerpo y extrae campos vitales (ej. el identificador del usuario UUID `sub` y atributos personalizados como `roles`).
+6. El Gateway adjunta discretamente esta confianza y variables directamente en la "metadata" (Headers) del llamado binario gRPC antes de despacharlo a la red privada interna (VPC).
+7. **Diseño Crítico Zero-Trust Mixto:** Los microservicios operan asumiendo confianza delegada hacia el Gateway. No deben llamar a Auth0 externamente cada vez que validan al usuario, ya extraen el ID de usuario desde la cabecera confiable del Gateway.
+
+### 3.2 Persistencia de Base de Datos y Prisma ORM
+
+Para respetar el verdadero paradigma de microservicios e impedir interbloqueos futuros ("God tables"), la persistencia aplica el principio de **Database-per-service**. En la actual instancia Docker se orquesta una enorme base de datos PostgreSQL pero particionada forzosamente a través de esquemas o conectores separados lógicamente (`user_db`, `catalog_db`, `sales_db`, `enrollment_db`).
+
+**Principios de Manejo de Datos:**
+- **ORM Prisma Configurado Aislado:** Todos los dominios y proyectos backend utilizan Prisma Object Relational Mapper de TypeScript. Cada uno tiene de manera individualizada un archivo `schema.prisma` que representa la única fuente de la verdad para su base específica.
+- **Acoplamiento Nulo:** Está terminantemente prohibido utilizar "Foreign Keys" relacionales SQL reales entre bases de datos separadas. Por ejemplo, la base de datos de `Enrollment Service` mantiene una tabla que registra referencias de `courseId` en texto plano (UUID), sin imponer ni saber una restricción foránea estricta a nivel SQL sobre la tabla `Courses` alojada en una máquina de base de datos distinta en `Catalog`.
+- **Migraciones Automáticas y CI:** Las actualizaciones de modelado en base de datos (DDL) se ejecutan mediante scripts atómicos localizados `npx prisma migrate deploy` exclusivos a la vida de cada contenedor Docker.
+
+### 3.3 Coreografía y Tolerancia a Fallos con RabbitMQ
+
+Implementar una venta que hable directamente y sincrónicamente al sistema de inscripciones (Sales -> Enrollments HTTP/gRPC delay) introduce riesgo, acoplamiento severo y problemas de timeout si las bases de datos fallan momentáneamente. Esta arquitectura migra el flujo a la Arquitectura Basada en Eventos (EDA).
+
+**Estrategia de Flujo Resiliente:**
+1. El estudiante paga en el API, el `Sales Service` orquesta la venta, guarda rígidamente en SQL la transacción terminada de pago (`sales_db`) y envía una confirmación HTTP visual ("Pago Completado") instantánea al cliente Frontend. 
+2. Internamente y tras bastidores, ese mismo servicio envía o transmite un pequeño mensaje estructurado de RabbitMQ al canal o tópico general `course_purchased_queue` con el `userId` y `courseId`.
+3. El `Enrollment Service` que actúa como worker de procesos en background (Consumidor), recolecta este mensaje flotante en su momento cuando pueda procesarlo, inscribe al alumno en la base de datos de `enrollment_db` permitiéndole abrir sus videos en milisegundos. Si Enrollment Database se apagó o reinició, el mensaje de matricula no se pierde jamás. RabbitMQ re-entregará agresivamente el mensaje cuando vuelva en línea asegurando Consistencia Eventual absoluta de datos.
+
+### 3.4 Despliegue en la Nube (Arquitectura y AWS)
+
+Para la fase de producción, este esquema contenerizado bajo Docker y Docker Compose mapea directamente a herramientas Cloud Native distribuidas sobre **AWS**:
+- **Cómputo Flexible (Amazon EKS):** Clústeres maestros gestionados de Kubernetes (`kubectl`) que auto-escalan microservicios basándose en CPU, configurando réplicas de los contenedores de NestJS.
+- **Frontend SPA Edge (CloudFront/S3):** Código estático de Vite/React no requiere instancias de máquina EC2; es almacenado crudo en buckets S3 y amplificado de borde por red CDN Amazon CloudFront a bajísima latencia mundial.
+- **Datos Multi-AZ (Amazon RDS):** Postgres levantado de modo administrado replicándose sincrónicamente en múltiples zonas (Availability Zones) para lograr respaldos de punto en tiempo y conmutación automática de red contra apagones masivos de servidor.
+- **Almacenamiento Seguro Privado de Media (S3):** Para reemplazar el LocalStack transitorio, se vinculan buckets S3 autenticados limitando accesos y protegiendo la piratería de videos del sistema.
+
+---
+
+## 4. Estructura de Endpoints de Integración
+
+### 4.1 Accesos REST (Interfaces Externas al Cliente SPA)
+
+La capa que expone el Gateway opera como un RESTful estándar usando JSON para que React lo asimile nativamente por fetch/axios.
+
+```text
+-- Authentication Gateway Layer --
+POST /users/register                 - Vinculación primera de roles/perfiles en Auth0 a la DB Interna User.
+
+-- Catalog Interaction Layer --
+GET  /catalog/courses                - Exposición paginada de todos los cursos comerciales públicos.
+POST /catalog/courses                - Orquestación de creación, módulos (Auth + Middleware Instructor Role).
+
+-- Storage Media Access Layer --
+GET  /media/upload-url               - Solicitud de obtención de URLs presigned para bucket de video directo.
+
+-- Transaccional Layer --
+POST /sales/checkout                 - Endpoint para recibir intención de pago (Simulado/Carrito). Gatilla Rabbit.
+
+-- Progress / Enrollment Layer --
+GET  /enrollments/my-courses         - Trae todos los cursos activos inyectados en background y porcentaje cursado.
+```
+
+### 4.2 Interfaces Internas gRPC y Protobuf (Backbone)
+
+Para las comunicaciones horizontales transparentes de baja latencia inter-backend, `gRPC` sobre Protocolo de control HTTP/2 compila los modelos centralizados. 
+
+```protobuf
+syntax = "proto3";
+
+package catalog;
+
+service CatalogService {
+  rpc CreateCourse (CreateCourseRequest) returns (CourseResponse);
+  rpc GetCourses (GetCoursesRequest) returns (CourseListResponse);
+}
+
+// Representación estricta de estructura y bitpacking
+message CreateCourseRequest {
+  string title = 1;
+  string description = 2;
+  double price = 3;
+  string instructorId = 4;
+}
 ```
 
 ---
 
-## 6. Inmersiones Profundas
+## 5. Decisiones Claves de Arquitectura de Ecosistema
 
-### 6.1 Esquema de Base de Datos
+### Toma de Decisión A: ¿gRPC vs API REST Internas (JSON HTTP)?
 
-Se emplea el patrón **Database-per-service**. Para optimizar costos en un entorno de desarrollo/académico, se puede utilizar una única instancia de base de datos (Ej. Amazon RDS), pero aislando completamente los datos a nivel de *esquemas lógicos*. Ningún microservicio tiene credenciales o visibilidad sobre el esquema de otro.
+*   **Opción A1:** Seguir utilizando controladores comunes NestJS Express de JSON HTTP con llamadas Axios desde el API Gateway a cada microservicio. (REST Tradicional).
+*   **Opción A2 [Decisión Implementada]:** gRPC sobre HTTP/2 compilando Proto Buffers centralmente en la carpeta `grpc-contracts/`.
 
-Las migraciones y modelado se realizan de forma declarativa con **Prisma ORM** dentro de cada repositorio individual.
+**Justificación:** La decisión recayó sobre la Opción A2 (gRPC) por el fenomenal rendimiento y la protección estricta. NestJS automatiza el consumo de paquetes binarios serializados con protoc. A pesar de una pequeña fricción para testearlos en Postman a diferencia del REST (que es simple texto legible), la capacidad de enviar tipos fuertemente tipados generados en Typescript a un microservicio sin tener errores de variables JSON que puedan corromper datos internos o hacer caer la aplicación por excepciones silenciosas de variables no nulas compensa ampliamente su implementación.
 
-### 6.2 Escalabilidad e Infraestructura
+### Toma de Decisión B: Base de Datos Monolítica Múltiple versus Independiente y Segregada.
 
-El sistema está diseñado Cloud-Native y se despliega en **AWS**:
-- **Cómputo:** Amazon EKS (Kubernetes) con despliegues de Pods por microservicio.
-- **Frontend:** Archivos estáticos en Amazon S3 distribuidos globalmente con Amazon CloudFront (CDN).
-- **Almacenamiento:** Amazon S3 para todo el material de video e imágenes.
-- **Base de Datos:** Amazon RDS Multi-AZ.
+*   **Opción B1:** Tener un único `schema.prisma` gigantesco compartido para que todos los contenedores Docker apunten a una enorme base central PostgreSQL y hacer relaciones relacionales `JOIN` en consultas complejas (Monolito SQL).
+*   **Opción B2 [Decisión Implementada]:** Database-Per-Service donde ni siquiera pueden compartir la misma string de esquema y carecen de constraints SQL físicos.
 
-### 6.4 Seguridad
-
-- Todo el control de identidad se delega a **Auth0** (estándar OpenID Connect).
-- Las llamadas desde el frontend incluyen un JWT.
-- El **API Gateway** asume la responsabilidad de descifrar y validar el JWT verificando la firma (RS256) usando el JWKS de Auth0 cacheado en memoria.
-- Si la solicitud es válida, el API Gateway extrae el `userId` y `role`, inyectándolos en la metadata de la llamada gRPC, por lo que los microservicios internos no necesitan verificar el token, solo confían en la identidad propagada por el Gateway.
-
-### 6.5 Extensibilidad
-
-Gracias a la segregación en dominios bounded-context, la arquitectura puede extenderse sin fricción. Por ejemplo, si se requiriera un sistema de foros de dudas (`ForumService`) o un sistema de reseñas (`ReviewService`), estos pueden desarrollarse en cualquier lenguaje de programación soportado por gRPC, crear sus propias bases de datos y conectarse al ecosistema sin necesidad de redesplegar los servicios de catálogo o ventas existentes.
-
-### 6.7 Proceso de Lanzamiento
-
-1. El código de cada microservicio incluye un `Dockerfile`.
-2. Las imágenes se construyen y suben a un registro de contenedores (e.g., Docker Hub o Amazon ECR).
-3. Los manifiestos de Kubernetes alojados en el repositorio `maestria-infra` se aplican (`kubectl apply -f`) al cluster EKS para orquestar los pods, ConfigMaps (variables de entorno) y servicios internos.
-
-### 6.11 Dependencias
-
-- **Auth0**: Como proveedor externo de gestión de identidades y JWT.
-- **Amazon S3**: Vital para el funcionamiento de `media-service` y almacenamiento de videos.
-- **RabbitMQ**: Obligatorio para garantizar el flujo de matriculación luego de las compras.
+**Justificación:** El arquitecto seleccionó Database-Per-Service. En arquitecturas escalables, permitir que el equipo mantenedor de Ventas (`Sales`) modifique la tabla "Payments" y eso detenga de golpe al equipo mantenedor de Cursos que hacia `JOIN` accidental en esa base interconectada es inaceptable. El Gateway hace un patrón clásico de `API COMPOSITION`, trayendo los datos de Catálogo y, en memoria temporal de RAM local del gateway, une esa información con los autores (Users) y retorna un único y bello JSON estructurado masivo a la UI de React.
 
 ---
 
-## Temas de Discusión
+## Interesados y Revisiones
 
-### Tema de Discusión: Comunicación Interna entre Microservicios
+- Equipo Docente, Evaluador de Proyecto de Grado / Maestría en la Nube.
+- Evaluadores DevOps (Arquitectura escalable en Kubernetes, Docker e integraciones de flujos de asincronía asimétrica).
 
-Para la intercomunicación del ecosistema interno, se requería decidir cómo el API Gateway (y en el futuro otros servicios) se hablarían entre sí.
-
-- Opción 1 [RECOMENDADA] - Uso de **gRPC** (sobre HTTP/2)
-- Opción 2 - Uso de **REST HTTP/1.1** tradicional
-
-#### Opción 1 [RECOMENDADA] - gRPC
-
-En este enfoque, se creó un repositorio compartido (`maestria-grpc-contracts`) que contiene archivos `.proto`. Los servicios compilan estos contratos para generar interfaces fuertemente tipadas.
-
-**Pros:**
-- Contratos de comunicación estrictos y centralizados. Si el contrato cambia, la compilación falla, previniendo errores en ejecución.
-- Rendimiento superior por la serialización binaria (Protobuf) y el uso de multiplexación nativa en HTTP/2.
-
-**Contras:**
-- Curva de aprendizaje técnica mayor frente a REST.
-- Mayor fricción para depuración manual (Postman/cURL tradicional no sirve directamente sin plugins específicos).
-
-#### Opción 2 - REST HTTP/1.1
-
-En este enfoque, cada microservicio expone endpoints convencionales con cuerpos en formato JSON.
-
-**Pros:**
-- Ubicuo, ampliamente conocido y extremadamente fácil de depurar y probar en aislamiento.
-
-**Contras:**
-- Mayor latencia debido a la serialización en texto plano (JSON).
-- No hay garantía estricta de cumplimiento de contratos entre emisor y receptor si no se configuran herramientas pesadas adicionales como OpenAPI/Swagger a nivel de red interna.
-
-**Conclusión**
-
-Dada la consideración de las opciones, decidimos optar por la **Opción 1 (gRPC)**. En un entorno distribuido, garantizar que el API Gateway envíe exactamente la forma de datos que el Catálogo espera (mediante validación por tipos compilados) reduce significativamente los bugs de integración. Además, compensa la latencia extra introducida al tener la red fragmentada en múltiples servicios.
-
----
-
-## Interesados
-
-- Equipo Académico y Catedrático evaluador de la maestría.
-
-## Contactos
-
-- **Líder Técnico / Autor:** GaboMV
+## Responsable
+- **Líder Técnico de Software / Investigador Académico:** GaboMV
