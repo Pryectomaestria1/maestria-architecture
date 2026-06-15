@@ -3,6 +3,9 @@
 > **Hub central de la arquitectura de la plataforma Udemy Clone.**  
 > Este documento describe la arquitectura implementada del ecosistema de microservicios: topología, servicios, comunicación, persistencia, seguridad, contratos e infraestructura de soporte.
 
+## 📺 Video de Explicación
+[👉 Ver Video de Explicación de la Arquitectura y Despliegue](https://drive.google.com/file/d/10ePGJeGcaqxZPl69J2lecI90n1Qn0aM0/view?usp=sharing)
+
 ---
 
 ## 1. Resumen Ejecutivo
