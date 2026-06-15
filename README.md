@@ -5,15 +5,15 @@
 
 ---
 
-## 📘 Documentos Principales
+## Documentos Principales
 
-👉 **[`INFORME_DE_ARQUITECTURA.md`](./INFORME_DE_ARQUITECTURA.md)**
+**[`INFORME_DE_ARQUITECTURA.md`](./INFORME_DE_ARQUITECTURA.md)**
 
 Contiene la descripción completa de la arquitectura: topología, responsabilidades por servicio, patrones de comunicación, persistencia, autenticación, almacenamiento de media, contratos compartidos, decisiones arquitectónicas y operación local/despliegue en nube (AWS).
 
 ---
 
-## 🗺️ Topología General de Componentes
+## Topología General de Componentes
 
 El ecosistema está compuesto por un API Gateway, cinco microservicios de dominio, un broker de eventos, object storage y una base de datos PostgreSQL por servicio. El detalle de cada nodo se encuentra en el [informe completo](./INFORME_DE_ARQUITECTURA.md); este diagrama sirve como mapa de orientación rápida.
 
@@ -63,7 +63,7 @@ graph TD
 
 ---
 
-## 🛠️ Repositorios del Ecosistema
+## Repositorios del Ecosistema
 
 El código del sistema se distribuye en los siguientes repositorios:
 
