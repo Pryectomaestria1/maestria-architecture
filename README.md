@@ -7,8 +7,7 @@
 
 ## 📘 Documentos Principales
 
-👉 **[`INFORME_DE_ARQUITECTURA.md`](./INFORME_DE_ARQUITECTURA.md)** (Local)
-👉 **[`DISEÑO_DESPLIEGUE_AWS.md`](./DISEÑO_DESPLIEGUE_AWS.md)** (AWS Cloud)
+👉 **[`INFORME_DE_ARQUITECTURA.md`](./INFORME_DE_ARQUITECTURA.md)**
 
 Contiene la descripción completa de la arquitectura: topología, responsabilidades por servicio, patrones de comunicación, persistencia, autenticación, almacenamiento de media, contratos compartidos, decisiones arquitectónicas y operación local/despliegue en nube (AWS).
 
